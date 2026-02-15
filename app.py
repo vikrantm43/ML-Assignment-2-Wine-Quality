@@ -23,8 +23,10 @@ def prepare_models():
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv'
     data = pd.read_csv(url, sep=';')
     
-    # Standardize training column names
+    # Standardize training column names (fixed acidity -> fixed_acidity)
     data.columns = [c.replace(' ', '_') for c in data.columns]
+    
+    # Define Target: 1 for Good (>=6), 0 for Bad
     data['target'] = (data['quality'] >= 6).astype(int)
     
     feature_cols = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar', 
@@ -34,6 +36,7 @@ def prepare_models():
     X = data[feature_cols].values
     y = data['target'].values
     
+    # Simple Train/Test Split for the demo
     split = int(0.8 * len(X))
     X_train, y_train = X[:split], y[:split]
     
@@ -42,7 +45,7 @@ def prepare_models():
     
     os.makedirs('./models', exist_ok=True)
     
-    # Train models
+    # Train a suite of models
     models = {
         'Logistic Regression': LogisticRegression(max_iter=1000).fit(X_train_scaled, y_train),
         'Random Forest': RandomForestClassifier(n_estimators=100).fit(X_train, y_train),
@@ -69,34 +72,38 @@ uploaded_file = st.sidebar.file_uploader("Upload Test CSV", type="csv")
 selected_model = st.sidebar.selectbox("Select Model", list(model_map.keys()))
 
 if uploaded_file:
-    # 1. Load User Data
-    test_df = pd.read_csv(uploaded_file)
-    original_display_df = test_df.copy() # Keep for the final table
+    # 1. Load User Data with auto-delimiter detection
+    try:
+        test_df = pd.read_csv(uploaded_file, sep=None, engine='python')
+    except Exception as e:
+        st.error(f"Error reading CSV: {e}")
+        st.stop()
     
-    # 2. Standardize names to lowercase/underscores to handle variations
-    test_df.columns = [c.strip().replace(' ', '_').lower() for c in test_df.columns]
+    # 2. Standardize column names (fix spaces and quotes)
+    test_df.columns = [c.strip().replace('"', '').replace(' ', '_') for c in test_df.columns]
     
-    # 3. Apply Column Mapping (Fixes your 'citric_acidity' and 'ph' issue)
+    # 3. Create 'target' if only 'quality' exists
+    if 'quality' in test_df.columns and 'target' not in test_df.columns:
+        test_df['target'] = (test_df['quality'] >= 6).astype(int)
+    
+    # 4. Handle specific naming inconsistencies
     mapping = {
         'citric_acidity': 'citric_acid',
-        'ph': 'pH'
+        'ph': 'pH' # Ensure casing matches model expectations
     }
     test_df = test_df.rename(columns=mapping)
     
-    # Define columns model expects
-    required_cols = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar', 
-                     'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 'density', 
-                     'pH', 'sulphates', 'alcohol']
+    st.write("### Data Preview")
+    st.dataframe(test_df.head(5))
     
-    # 4. Process and Predict
-    if all(col in test_df.columns for col in required_cols) and 'target' in test_df.columns:
-        X_test = test_df[required_cols].values
+    # 5. Process and Predict
+    if all(col in test_df.columns for col in feature_cols) and 'target' in test_df.columns:
+        X_test = test_df[feature_cols].values
         y_test = test_df['target'].values
         
-        # Scale for Linear/Distance models (Logic matches your requirement)
+        # Scaling logic
         X_test_scaled = scaler.transform(X_test)
         
-        # Load the selected model
         model = joblib.load(f"./models/{model_map[selected_model]}")
         
         if selected_model in ['Random Forest', 'XGBoost']:
@@ -104,33 +111,33 @@ if uploaded_file:
         else:
             y_pred = model.predict(X_test_scaled)
         
-        # --- OUTPUT SECTION ---
-        st.success(f"Successfully analyzed {len(test_df)} wine samples using {selected_model}!")
-
-        # A. Detailed Results Table
-        st.subheader("📋 Prediction Results")
-        results_df = original_display_df.copy()
-        results_df['Predicted_Quality'] = ["Good (1)" if p == 1 else "Bad (0)" for p in y_pred]
-        st.dataframe(results_df.style.highlight_max(subset=['Predicted_Quality'], color='#d4edda'))
-
-        # B. Metrics
-        st.subheader("📊 Model Performance")
-        col1, col2 = st.columns(2)
-        col1.metric("Accuracy", f"{accuracy_score(y_test, y_pred):.2%}")
-        col2.metric("F1 Score", f"{f1_score(y_test, y_pred, average='weighted'):.3f}")
+        # --- OUTPUTS ---
+        st.success(f"Analysis complete for {len(test_df)} samples!")
         
-        # C. Confusion Matrix Visualization
-        fig, ax = plt.subplots(figsize=(5, 3))
-        sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d', cmap='YlGnBu')
-        plt.xlabel('Predicted')
-        plt.ylabel('Actual')
-        st.pyplot(fig)
+        # Results Table
+        results_df = test_df.copy()
+        results_df['Prediction'] = ["Good (1)" if p == 1 else "Bad (0)" for p in y_pred]
+        st.subheader("📋 Classification Table")
+        st.dataframe(results_df[['target', 'Prediction'] + feature_cols])
 
+        # Metrics
+        st.subheader("📊 Model Performance")
+        c1, c2 = st.columns(2)
+        c1.metric("Accuracy", f"{accuracy_score(y_test, y_pred):.2%}")
+        c2.metric("F1 Score", f"{f1_score(y_test, y_pred, average='weighted'):.3f}")
+        
+        # Confusion Matrix
+        fig, ax = plt.subplots(figsize=(5, 3))
+        sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d', cmap='RdPu')
+        plt.title(f"Confusion Matrix: {selected_model}")
+        st.pyplot(fig)
     else:
-        st.error("Missing columns! Please ensure your CSV has the 11 chemical features and 'target'.")
-        st.write("Found columns:", list(test_df.columns))
+        st.error("Missing required columns!")
+        st.write("Model needs: `fixed_acidity`, `volatile_acidity`, `citric_acid`, `residual_sugar`, `chlorides`, `free_sulfur_dioxide`, `total_sulfur_dioxide`, `density`, `pH`, `sulphates`, `alcohol`, and `target` (or `quality`).")
+        st.write("Detected in your file:", list(test_df.columns))
+
 else:
-    st.info("👋 Upload your `data.csv` in the sidebar to get started.")
+    st.info("👋 Upload `winequality-red.csv` in the sidebar to view the results.")
 
 st.markdown("---")
-st.caption("UCI Red Wine Quality Classification System")
+st.caption("UCI Wine Quality Dataset Analysis • Streamlit App")
