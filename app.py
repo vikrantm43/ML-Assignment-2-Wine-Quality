@@ -14,6 +14,9 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classifi
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+from sklearn.model_selection
+
+
 st.title("🍷 Wine Quality Classification")
 
 @st.cache_resource
