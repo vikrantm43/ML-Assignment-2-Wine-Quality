@@ -72,49 +72,26 @@ if uploaded_file:
     # Read CSV
     test_df = pd.read_csv(uploaded_file)
     
-    # FIX: Standardize uploaded column names to match model training
-    # This turns "fixed acidity" into "fixed_acidity" automatically
+    # 1. Clean up column names (lowercase and underscores)
     test_df.columns = [c.strip().replace(' ', '_').lower() for c in test_df.columns]
+    
+    # 2. FIX: Map the variations in your file to what the model expects
+    column_mapping = {
+        'citric_acidity': 'citric_acid',
+        'ph': 'pH'  # Ensure it matches the "Required" list exactly
+    }
+    test_df = test_df.rename(columns=column_mapping)
     
     st.write("### Data Preview")
     st.dataframe(test_df.head(3))
 
+    # Define the exact required list (must match what's in the error)
+    feature_cols = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar', 
+                    'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 'density', 
+                    'pH', 'sulphates', 'alcohol']
+
     # Validation
     if all(col in test_df.columns for col in feature_cols) and 'target' in test_df.columns:
+        # ... (rest of your prediction logic)
         X_test = test_df[feature_cols].values
-        y_test = test_df['target'].values
-        
-        # Scale
-        X_test_scaled = scaler.transform(X_test)
-        
-        # Predict
-        model = joblib.load(f"./models/{model_map[selected_model]}")
-        if selected_model in ['Random Forest', 'XGBoost']:
-            y_pred = model.predict(X_test)
-        else:
-            y_pred = model.predict(X_test_scaled)
-
-        # Metrics
-        acc = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred, average='weighted')
-        
-        c1, c2 = st.columns(2)
-        c1.metric("Accuracy", f"{acc:.2%}")
-        c2.metric("F1 Score", f"{f1:.3f}")
-
-        # Plots
-        fig, ax = plt.subplots(figsize=(5, 3))
-        sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d', cmap='magma', ax=ax)
-        plt.title("Confusion Matrix")
-        st.pyplot(fig)
-        
-        st.text("Classification Report:")
-        st.code(classification_report(y_test, y_pred))
-    else:
-        st.error(f"**Error:** Missing columns. Required: {', '.join(feature_cols)} and **target**")
-        st.write("Your columns:", list(test_df.columns))
-else:
-    st.info("Please upload a CSV file to begin. Ensure it has the 11 chemical features and a 'target' column.")
-
-st.markdown("---")
-st.caption("UCI Red Wine Quality Dataset Analysis")
+        # ...
