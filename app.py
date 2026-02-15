@@ -69,29 +69,55 @@ uploaded_file = st.sidebar.file_uploader("Upload Test CSV", type="csv")
 selected_model = st.sidebar.selectbox("Select Model", list(model_map.keys()))
 
 if uploaded_file:
-    # Read CSV
     test_df = pd.read_csv(uploaded_file)
     
-    # 1. Clean up column names (lowercase and underscores)
+    # 1. Standardize names to lowercase/underscores
     test_df.columns = [c.strip().replace(' ', '_').lower() for c in test_df.columns]
     
-    # 2. FIX: Map the variations in your file to what the model expects
-    column_mapping = {
+    # 2. THE FIX: Map your specific CSV columns to the model's expected names
+    # Your file uses 'citric_acidity', model wants 'citric_acid'
+    # Your file uses 'ph', model wants 'pH'
+    mapping = {
         'citric_acidity': 'citric_acid',
-        'ph': 'pH'  # Ensure it matches the "Required" list exactly
+        'ph': 'pH'
     }
-    test_df = test_df.rename(columns=column_mapping)
+    test_df = test_df.rename(columns=mapping)
     
     st.write("### Data Preview")
     st.dataframe(test_df.head(3))
-
-    # Define the exact required list (must match what's in the error)
-    feature_cols = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar', 
-                    'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 'density', 
-                    'pH', 'sulphates', 'alcohol']
-
-    # Validation
-    if all(col in test_df.columns for col in feature_cols) and 'target' in test_df.columns:
-        # ... (rest of your prediction logic)
-        X_test = test_df[feature_cols].values
-        # ...
+    
+    # The exact list the model expects
+    required_cols = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar', 
+                     'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 'density', 
+                     'pH', 'sulphates', 'alcohol']
+    
+    # Check if all required columns (after renaming) exist
+    if all(col in test_df.columns for col in required_cols) and 'target' in test_df.columns:
+        X_test = test_df[required_cols].values
+        y_test = test_df['target'].values
+        
+        # Scale for Linear/Distance models
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Load and Predict
+        model = joblib.load(f"./models/{model_map[selected_model]}")
+        
+        if selected_model in ['Random Forest', 'XGBoost']:
+            y_pred = model.predict(X_test)
+        else:
+            y_pred = model.predict(X_test_scaled)
+        
+        # Results
+        acc = accuracy_score(y_test, y_pred)
+        st.success(f"Model successfully processed {len(test_df)} rows!")
+        
+        col1, col2 = st.columns(2)
+        col1.metric("Accuracy", f"{acc:.2%}")
+        col2.metric("F1 Score", f"{f1_score(y_test, y_pred, average='weighted'):.3f}")
+        
+        # Confusion Matrix
+        fig, ax = plt.subplots(figsize=(5, 3))
+        sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d', cmap='YlGnBu')
+        st.pyplot(fig)
+    else:
+        st.error("Still missing columns after renaming. Check if 'citric_acidity' or 'target' is present.")
