@@ -1,75 +1,92 @@
-!pip install streamlit
 import streamlit as st
 import pandas as pd
-import pickle
+import joblib  # Use joblib for all (consistent with your saves)
 import os
-from sklearn.metrics import confusion_matrix, classification_report
+import numpy as np
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
+from sklearn.preprocessing import StandardScaler
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# App Title [cite: 9]
-st.title("🍷 Wine Quality Classification Dashboard")
+st.title("Wine Quality Classification Dashboard")
 
-# Step a: Dataset upload option (CSV) [cite: 91]
+# Sidebar
 st.sidebar.header("1. Upload Data")
-uploaded_file = st.sidebar.file_uploader("Upload your test CSV file", type=["csv"])
+uploaded_file = st.sidebar.file_uploader("Upload your test CSV file", type="csv")
 
-# Step b: Model selection dropdown [cite: 92]
 st.sidebar.header("2. Choose Model")
 model_option = st.sidebar.selectbox(
     "Select a Classification Model",
-    ("Logistic Regression", "Decision Tree", "KNN", "Naive Bayes", "Random Forest", "XGBoost")
+    ["Logistic Regression", "Decision Tree", "KNN", "Naive Bayes", "Random Forest", "XGBoost"]
 )
 
-def load_model(name):
-    # Mapping selection to saved filenames
-    model_map = {
-        "Logistic Regression": "lr_model.pkl",
-        "Decision Tree": "dt_model.pkl",
-        "KNN": "knn_model.pkl",
-        "Naive Bayes": "nb_model.pkl",
-        "Random Forest": "rf_model.pkl",
-        "XGBoost": "xgb_model.pkl"
-    }
-    with open(os.path.join('model', model_map[name]), 'rb') as f:
-        return pickle.load(f)
+# Model mapping (filenames without .pkl)
+model_map = {
+    "Logistic Regression": "lrmodel",
+    "Decision Tree": "dtmodel",
+    "KNN": "knnmodel",
+    "Naive Bayes": "nbmodel",
+    "Random Forest": "rfmodel",
+    "XGBoost": "xgbmodel"
+}
+
+# Load scaler (shared for scaled models)
+@st.cache_resource  # Cache for performance
+def load_scaler():
+    return joblib.load("./models/scaler.pkl")
+
+# Load model function
+@st.cache_resource
+def load_model(model_name):
+    model_filename = model_map[model_name] + ".pkl"
+    model_path = os.path.join("./models", model_filename)
+    if os.path.exists(model_path):
+        return joblib.load(model_path)
+    else:
+        st.error(f"Model file {model_path} not found!")
+        return None
 
 if uploaded_file is not None:
-    # Load test data [cite: 91]
+    # Load and preview test data
     test_df = pd.read_csv(uploaded_file)
-    st.write("### Test Data Preview")
+    st.write("Test Data Preview")
     st.dataframe(test_df.head())
 
-    # Pre-processing (Assuming target column 'target' is present)
+    # Assume 'target' column exists (binary: 0/1)
     if 'target' in test_df.columns:
         X_test = test_df.drop('target', axis=1)
         y_test = test_df['target']
 
+        # Load scaler and scale (for LR, DT(scaled), KNN, NB)
+        scaler = load_scaler()
+        X_test_scaled = scaler.transform(X_test)
+
         # Load selected model
         model = load_model(model_option)
-        y_pred = model.predict(X_test)
+        if model:
+            # Predict (use scaled for models that need it; RF/XGB don't but safe)
+            y_pred = model.predict(X_test_scaled)
+            
+            # Metrics
+            acc = accuracy_score(y_test, y_pred)
+            f1 = f1_score(y_test, y_pred)
+            
+            st.write(f"**Evaluation Metrics: {model_option}**")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Accuracy", f"{acc:.4f}")
+            col2.metric("F1 Score", f"{f1:.4f}")
 
-        # Step c: Display of evaluation metrics [cite: 93]
-        st.write(f"## Evaluation Metrics: {model_option}")
-        col1, col2, col3 = st.columns(3)
+            # Confusion Matrix
+            st.write("**Confusion Matrix**")
+            cm = confusion_matrix(y_test, y_pred)
+            fig, ax = plt.subplots()
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+            ax.set_title(f"{model_option} Confusion Matrix")
+            st.pyplot(fig)
 
-        # Note: You can calculate these dynamically or display pre-saved values [cite: 40-45]
-        from sklearn.metrics import accuracy_score, f1_score
-        acc = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-
-        col1.metric("Accuracy", f"{acc:.2f}")
-        col2.metric("F1 Score", f"{f1:.2f}")
-
-        # Step d: Confusion matrix or classification report [cite: 94]
-        st.write("### Confusion Matrix")
-        cm = confusion_matrix(y_test, y_pred)
-        fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
-        st.pyplot(fig)
-
-        st.write("### Classification Report")
-        st.text(classification_report(y_test, y_pred))
+            # Classification Report
+            st.write("**Classification Report**")
+            st.text(classification_report(y_test, y_pred))
     else:
         st.error("The uploaded CSV must contain a 'target' column for evaluation.")
 else:
