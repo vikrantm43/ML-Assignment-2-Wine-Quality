@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
@@ -15,87 +14,94 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classifi
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# ONE-TIME: Train & save models (cached, fast)
+st.title("🍷 Wine Quality Classification")
+
 @st.cache_resource
-def train_and_save_models():
-    # Load data
+def prepare_models():
+    # Data
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv'
     data = pd.read_csv(url, sep=';')
     data['target'] = (data['quality'] >= 6).astype(int)
-    X = data.drop(['quality', 'target'], axis=1)
-    y = data['target']
+    X = data.drop(['quality', 'target'], axis=1).values  # NUMPY - no names!
+    y = data['target'].values
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = np.split(X, [int(0.8*len(X))], axis=0)  # Simple split
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    os.makedirs('models', exist_ok=True)
+    os.makedirs('./models', exist_ok=True)
     
     models = {
-        'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42).fit(X_train_scaled, y_train),
-        'Decision Tree': DecisionTreeClassifier(random_state=42).fit(X_train_scaled, y_train),
+        'Logistic Regression': LogisticRegression(max_iter=1000).fit(X_train_scaled, y_train),
+        'Decision Tree': DecisionTreeClassifier().fit(X_train_scaled, y_train),
         'KNN': KNeighborsClassifier(n_neighbors=5).fit(X_train_scaled, y_train),
         'Naive Bayes': GaussianNB().fit(X_train_scaled, y_train),
-        'Random Forest': RandomForestClassifier(n_estimators=100, random_state=42).fit(X_train, y_train),
-        'XGBoost': XGBClassifier(n_estimators=100, random_state=42, eval_metric='logloss').fit(X_train, y_train)
+        'Random Forest': RandomForestClassifier(n_estimators=100).fit(X_train, y_train),
+        'XGBoost': XGBClassifier(n_estimators=100, eval_metric='logloss').fit(X_train, y_train)
     }
     
-    # Save
-    joblib.dump(scaler, 'models/scaler.pkl')
+    joblib.dump(scaler, './models/scaler.pkl')
+    model_map = {}
     for name, model in models.items():
-        safename = name.lower().replace(' ', '').replace('-', '')
-        joblib.dump(model, f'models/{safename}.pkl')
+        filename = name.lower().replace(' ', '_') + '.pkl'
+        joblib.dump(model, f'./models/{filename}')
+        model_map[name] = filename
     
-    return models, scaler
+    return model_map, scaler
 
-# Train once
-models_dict, scaler = train_and_save_models()
+model_map, scaler = prepare_models()
 
-# Rest of app (model_map, load_model, UI) – copy from previous app.py lines 42-end
-st.title("Wine Quality Classification Dashboard")
+st.sidebar.header("📁 Upload Test CSV")
+uploaded_file = st.sidebar.file_uploader("Choose CSV", type="csv")
 
-st.sidebar.header("1. Upload Data")
-uploaded_file = st.sidebar.file_uploader("Upload test CSV", type="csv")
-
-st.sidebar.header("2. Choose Model")
-model_option = st.sidebar.selectbox("Select Model", list(models_dict.keys()))
-
-model_map = {name: name.lower().replace(' ', '').replace('-', '') for name in models_dict.keys()}
-
-@st.cache_resource
-def load_model_cached(name):
-    safename = model_map[name]
-    return joblib.load(f"./models/{safename}.pkl")
+model_names = list(model_map.keys())
+selected_model = st.sidebar.selectbox("Choose Model", model_names)
 
 if uploaded_file:
     test_df = pd.read_csv(uploaded_file)
-    st.write("Test Data Preview:", test_df.head())
+    st.write("**Preview:**", test_df.head(3))
     
-    if 'target' in test_df.columns:
-        X_test = test_df.drop('target', axis=1)
-        y_test = test_df['target']
+    required_cols = ['fixed_acidity', 'volatile_acidity', 'citric_acid', 'residual_sugar', 
+                     'chlorides', 'free_sulfur_dioxide', 'total_sulfur_dioxide', 'density', 
+                     'pH', 'sulphates', 'alcohol']
+    
+    if all(col in test_df.columns for col in required_cols) and 'target' in test_df.columns:
+        X_test = test_df[required_cols].values  # NUMPY!
+        y_test = test_df['target'].values
+        
         X_test_scaled = scaler.transform(X_test)
         
-        model = load_model_cached(model_option)
-        y_pred = model.predict(X_test_scaled)
+        model_filename = model_map[selected_model]
+        model = joblib.load(f"./models/{model_filename}")
+        
+        # RF/XGB use unscaled; others scaled
+        if selected_model in ['Random Forest', 'XGBoost']:
+            y_pred = model.predict(X_test)
+        else:
+            y_pred = model.predict(X_test_scaled)
         
         acc = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred, average='weighted')
         
-        st.subheader(f"{model_option} Results")
         col1, col2 = st.columns(2)
-        col1.metric("Accuracy", f"{acc:.4f}")
-        col2.metric("F1 Score", f"{f1:.4f}")
+        col1.metric("Accuracy", f"{acc:.3f}")
+        col2.metric("F1 Score", f"{f1:.3f}")
         
-        # Confusion Matrix
+        st.subheader("Confusion Matrix")
         cm = confusion_matrix(y_test, y_pred)
-        fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        fig, ax = plt.subplots(figsize=(6,4))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
         st.pyplot(fig)
         
+        st.subheader("Classification Report")
         st.code(classification_report(y_test, y_pred))
+        
     else:
-        st.error("CSV needs 'target' column (0/1)")
+        st.error("**CSV must have exact columns:** fixed_acidity,volatile_acidity,citric_acid,residual_sugar,chlorides,free_sulfur_dioxide,total_sulfur_dioxide,density,pH,sulphates,alcohol,**target**")
+        st.info("Use sample CSV from previous messages.")
 else:
-    st.info("👆 Upload CSV first!")
+    st.info("👆 Upload CSV with 11 features + 'target' column")
+
+st.markdown("---")
+st.caption("Trained on UCI Wine Quality dataset. Deadline-proof!")
