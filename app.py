@@ -14,7 +14,15 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classifi
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from sklearn.model_selection
+import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model
+
 
 
 st.title("🍷 Wine Quality Classification")
